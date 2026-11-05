@@ -150,9 +150,33 @@ header.entete{display:flex;align-items:center;justify-content:space-between;gap:
 .icone{width:38px;height:38px;border-radius:8px;border:none;background:transparent;display:grid;place-items:center}
 .icone:hover{background:rgba(0,0,0,.06)}
 .icone svg{width:19px;height:19px;stroke:var(--doux);stroke-width:2;fill:none}
-.note.fait{opacity:.62}
-.note.fait .intitule{text-decoration:line-through}
+.note.fait{opacity:.72}
+
 .vide{color:var(--doux);font-size:.95rem;text-align:center;padding:1.2rem .5rem;border:2px dashed var(--trait);border-radius:12px}
+
+/* Journée affichée */
+.ligne-jour{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.3rem}
+.ligne-jour .outils{margin-bottom:0}
+.barre-jour{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+.jour-nav{width:44px;height:44px;border-radius:50%;border:2px solid var(--trait);background:var(--surface);font-size:1.6rem;line-height:1;display:grid;place-items:center;color:var(--encre);padding:0 0 3px}
+.jour-nav:disabled{opacity:.3;cursor:default}
+.jour-titre{min-width:12.5rem}
+.jour-titre h2{margin:0;font-size:1.5rem;line-height:1.15}
+.jour-titre span{font-size:.9rem;color:var(--doux)}
+.lecture .jour-titre span{color:var(--cognac-texte);font-weight:700}
+#jour-auj{min-height:42px;padding:.4rem .9rem;font-size:.95rem}
+.lecture .coche input{cursor:default}
+.lecture .intitule{cursor:default}
+
+/* Report et commentaires du jour */
+.report{display:inline-block;margin-top:.4rem;font-size:.78rem;font-weight:700;color:var(--urgent);background:var(--surface);border-radius:999px;padding:.05rem .55rem}
+.comm{margin-top:.55rem}
+.comm input{width:100%;border:none;border-bottom:2px dashed rgba(0,0,0,.18);background:transparent;padding:.35rem .1rem;font-size:.92rem;color:var(--encre);border-radius:0;min-height:36px}
+.comm input:focus{outline:none;border-bottom-style:solid;border-bottom-color:var(--c)}
+.comm input::placeholder{color:var(--doux)}
+.comm-auteur{display:block;font-size:.76rem;color:var(--doux);font-style:normal;margin-top:.15rem}
+.comm-texte{margin:.55rem 0 0;font-size:.92rem;font-style:italic;white-space:pre-wrap;overflow-wrap:anywhere}
+.note.fait .texte-tache{text-decoration:line-through}
 
 /* Terminées */
 .col-faites{margin-top:1.3rem}
@@ -164,6 +188,8 @@ header.entete{display:flex;align-items:center;justify-content:space-between;gap:
 /* Téléphone : une colonne à la fois */
 @media (max-width:760px){
   .app{padding:0 .9rem 2.5rem}
+  .jour-titre{min-width:0}
+  .jour-titre h2{font-size:1.25rem}
   .onglets{display:grid}
   .tableau{grid-template-columns:1fr}
   .colonne:not(.active){display:none}
@@ -232,6 +258,13 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
     <button class="btn btn-leger" type="button" id="btn-vu">Marquer comme vu</button>
   </div>
 
+  <div class="ligne-jour">
+    <div class="barre-jour">
+      <button class="jour-nav" type="button" id="jour-prec" aria-label="Jour précédent">‹</button>
+      <div class="jour-titre"><h2 id="jour-texte"></h2><span id="jour-sous"></span></div>
+      <button class="jour-nav" type="button" id="jour-suiv" aria-label="Jour suivant">›</button>
+      <button class="btn btn-leger cache" type="button" id="jour-auj">Revenir à aujourd’hui</button>
+    </div>
   <div class="outils">
     <span class="outils-label">Voir :</span>
     <div class="filtres" role="group" aria-label="Filtrer par personne">
@@ -239,6 +272,7 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
       <button class="filtre" data-filtre="moi" aria-pressed="false">Moi</button>
       <button class="filtre" data-filtre="autre" aria-pressed="false" id="filtre-autre">Marianne</button>
     </div>
+  </div>
   </div>
 
   <nav class="onglets" aria-label="Colonnes">
@@ -268,7 +302,7 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
         <label><input type="radio" name="t-resp" value="Les deux" checked><span>Les deux</span></label>
       </div>
     </fieldset>
-    <label class="champ"><span>Commentaire (facultatif)</span><textarea id="t-comm" maxlength="2000"></textarea></label>
+    <label class="champ"><span>Description (facultatif)</span><textarea id="t-comm" maxlength="2000"></textarea></label>
     <p class="erreur" id="erreur-tache" role="alert"></p>
     <div class="pied">
       <button class="btn btn-leger" type="button" id="btn-annuler">Annuler</button>
@@ -292,18 +326,35 @@ const UTILISATEURS = {
 /* ===================================================== */
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
-const TABLE = "todo_taches";
+const TABLE = "todo_taches";      // les tâches
+const SUIVI = "todo_suivi";       // le suivi jour par jour (routines cochées, commentaires)
 const COLONNES = [
   { id: "a_faire", nom: "À faire", aide: "Les tâches en cours" },
-  { id: "routine", nom: "Routine", aide: "Les tâches qui reviennent" },
+  { id: "routine", nom: "Routine", aide: "Repart à zéro chaque jour" },
   { id: "pas_urgent", nom: "Pas urgent", aide: "Quand on a le temps" }
 ];
 const NOMS = Object.fromEntries(COLONNES.map(c => [c.id, c.nom]));
 
 let taches = [], moi = "", filtre = "toutes", colonneMobile = "a_faire";
 let tacheEnEdition = null, dernierPassage = null, canal = null;
-const ouvertes = new Set();
+let jourVu = "";                  // journée affichée (AAAA-MM-JJ)
+const suiviParJour = {};          // { "AAAA-MM-JJ": { tache_id: ligne } }
 const $ = (id) => document.getElementById(id);
+
+/* ---------- Dates ---------- */
+const deux = (n) => String(n).padStart(2, "0");
+function jourDe(valeur){ const d = new Date(valeur); return `${d.getFullYear()}-${deux(d.getMonth() + 1)}-${deux(d.getDate())}`; }
+function aujourdhui(){ return jourDe(new Date()); }
+function enDate(jour){ const [a, m, j] = jour.split("-").map(Number); return new Date(a, m - 1, j); }
+function decaler(jour, n){ const d = enDate(jour); d.setDate(d.getDate() + n); return jourDe(d); }
+function jourLong(jour){
+  const d = enDate(jour);
+  const opts = { weekday: "long", day: "numeric", month: "long" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  const t = d.toLocaleDateString("fr-FR", opts);
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function jourCourt(jour){ return enDate(jour).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" }); }
 
 /* ---------- Utilitaires ---------- */
 function chargement(on){ $("chargement").classList.toggle("cache", !on); }
@@ -311,10 +362,7 @@ function maintenant(){ return new Date().toISOString(); }
 const ms = (d) => d ? new Date(d).getTime() : 0;
 function autre(){ return moi === "Marianne" ? "Angel" : "Marianne"; }
 function echapper(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-function dateHeure(ts){
-  const d = new Date(ts);
-  return d.toLocaleDateString("fr-FR") + " à " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-}
+function heure(ts){ return new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); }
 function nomDe(email){
   const e = (email || "").toLowerCase();
   if (UTILISATEURS[e]) return UTILISATEURS[e];
@@ -342,26 +390,51 @@ function messageErreur(err){
   if (/invalid api key|no api key/i.test(m)) return "Clé Supabase incorrecte dans le fichier.";
   if (/fetch|network/i.test(m)) return "Le serveur ne répond pas. Vérifiez la connexion internet.";
   if (/row-level security|permission/i.test(m)) return "Ce compte n’a pas accès aux tâches.";
-  if (/relation .* does not exist|todo_taches/i.test(m)) return "La table des tâches n’existe pas encore : lancez setup.sql dans Supabase.";
+  if (/todo_suivi|supprime_le/i.test(m)) return "La base n’est pas à jour : lancez le nouveau script SQL dans Supabase.";
+  if (/relation .* does not exist|todo_taches/i.test(m)) return "La table des tâches n’existe pas encore : lancez le script SQL dans Supabase.";
   return "Erreur : " + (m || "action impossible.");
-}
-// Une tâche est « nouvelle » si l’autre personne l’a créée ou modifiée depuis ma dernière visite
-function nouveaute(t){
-  if (!dernierPassage) return null;
-  const quand = t.maj_le || t.cree_le, qui = t.maj_par || t.cree_par;
-  if (!qui || qui === moi || ms(quand) <= ms(dernierPassage)) return null;
-  if (ms(t.cree_le) > ms(dernierPassage)) return "Nouveau";
-  if (t.fait && t.fait_par === qui) return "Cochée par " + qui;
-  return "Modifiée par " + qui;
 }
 function remplacer(ligne){
   const i = taches.findIndex(t => t.id === ligne.id);
   if (i >= 0) taches[i] = ligne; else taches.push(ligne);
 }
+function rangerSuivi(ligne){
+  (suiviParJour[ligne.jour] ||= {})[ligne.tache_id] = ligne;
+}
+
+/* ---------- Ce qui s’affiche pour une journée ---------- */
+const suiviDe = (t, jour) => (suiviParJour[jour] || {})[t.id] || null;
+function presente(t, jour){
+  if (jourDe(t.cree_le) > jour) return false;                         // pas encore créée
+  if (t.supprime_le && jourDe(t.supprime_le) <= jour) return false;    // supprimée
+  if (t.onglet === "routine") return true;                             // une routine revient chaque jour
+  return !t.fait || jourDe(t.fait_le) >= jour;                         // reportée jusqu’au jour où elle est faite
+}
+function etat(t, jour){
+  if (t.onglet === "routine") {
+    const s = suiviDe(t, jour);
+    return s && s.fait ? { fait: true, par: s.fait_par, le: s.fait_le } : { fait: false };
+  }
+  return t.fait && jourDe(t.fait_le) === jour ? { fait: true, par: t.fait_par, le: t.fait_le } : { fait: false };
+}
+// Changements faits par l’autre personne depuis ma dernière visite (vue du jour uniquement)
+function nouveaute(t){
+  if (!dernierPassage || jourVu !== aujourdhui()) return null;
+  const limite = ms(dernierPassage), qui = autre();
+  const s = suiviDe(t, jourVu);
+  const surTache = (t.maj_par || t.cree_par) === qui && ms(t.maj_le || t.cree_le) > limite;
+  const surSuivi = s && s.maj_par === qui && ms(s.maj_le) > limite;
+  if (!surTache && !surSuivi) return null;
+  if (t.cree_par === qui && ms(t.cree_le) > limite) return "Nouveau";
+  const e = etat(t, jourVu);
+  if (e.fait && e.par === qui) return "Cochée par " + qui;
+  if (surSuivi && s.commentaire_par === qui) return "Commentée par " + qui;
+  return "Modifiée par " + qui;
+}
 
 /* ---------- Réseau ---------- */
 function majReseau(){ $("reseau").classList.toggle("cache", navigator.onLine); }
-window.addEventListener("online", () => { majReseau(); if (moi) chargerTaches(); });
+window.addEventListener("online", () => { majReseau(); if (moi) toutCharger(); });
 window.addEventListener("offline", majReseau);
 
 /* ---------- Connexion ---------- */
@@ -407,17 +480,33 @@ async function demarrer(user){
   $("filtre-autre").textContent = autre();
   $("ecran-connexion").classList.add("cache");
   $("ecran-app").classList.remove("cache");
-  await chargerTaches();
+  jourVu = aujourdhui();
+  await toutCharger();
   ecouterTempsReel();
 }
 
 /* ---------- Données ---------- */
-async function chargerTaches(){
+async function chargerSuivi(jour){
+  const { data, error } = await db.from(SUIVI).select("*").eq("jour", jour);
+  if (error) { toast(messageErreur(error)); return; }
+  suiviParJour[jour] = {};
+  (data || []).forEach(rangerSuivi);
+}
+async function toutCharger(){
   chargement(true);
   const { data, error } = await db.from(TABLE).select("*").order("cree_le", { ascending: true });
-  chargement(false);
-  if (error) { toast(messageErreur(error)); return; }
+  if (error) { chargement(false); toast(messageErreur(error)); return; }
   taches = data || [];
+  const jours = new Set([aujourdhui(), jourVu]);
+  await Promise.all([...jours].map(chargerSuivi));
+  chargement(false);
+  afficher();
+}
+async function allerAuJour(jour){
+  const auj = aujourdhui();
+  if (jour > auj) jour = auj;
+  jourVu = jour;
+  if (!suiviParJour[jour]) { chargement(true); await chargerSuivi(jour); chargement(false); }
   afficher();
 }
 
@@ -429,8 +518,25 @@ function ecouterTempsReel(){
       else remplacer(p.new);
       afficher();
     })
+    .on("postgres_changes", { event: "*", schema: "public", table: SUIVI }, (p) => {
+      if (p.eventType === "DELETE") { const o = p.old; if (o.jour && suiviParJour[o.jour]) delete suiviParJour[o.jour][o.tache_id]; }
+      else if (suiviParJour[p.new.jour]) rangerSuivi(p.new);
+      afficher();
+    })
     .subscribe((statut) => { if (statut === "CHANNEL_ERROR") toast("Synchronisation en direct interrompue. Rechargez la page."); });
 }
+
+// Passage à minuit : si l’appli reste ouverte, elle bascule sur la nouvelle journée
+let dernierJour = aujourdhui();
+setInterval(async () => {
+  const auj = aujourdhui();
+  if (auj === dernierJour || !moi) return;
+  const suivaitAujourdhui = jourVu === dernierJour;
+  dernierJour = auj;
+  await chargerSuivi(auj);
+  if (suivaitAujourdhui) jourVu = auj;
+  afficher();
+}, 60000);
 
 /* ---------- Affichage ---------- */
 function correspondFiltre(t){
@@ -450,72 +556,100 @@ function avatars(resp){
   return `<span class="resp"><span class="avatars">${ronds}</span>${qui.join(" et ")}</span>`;
 }
 
-function note(t){
+function note(t, modifiable){
+  const e = etat(t, jourVu);
+  const s = suiviDe(t, jourVu);
   const nouv = nouveaute(t);
-  return `<li class="note ${t.fait ? "fait" : ""} ${nouv ? "nouveau" : ""}">
+  const reportee = !e.fait && t.onglet !== "routine" && jourDe(t.cree_le) < jourVu;
+  const comm = s && s.commentaire ? s.commentaire : "";
+  let blocComm = "";
+  if (modifiable) {
+    blocComm = `<div class="comm"><input type="text" maxlength="500" data-comm="${t.id}" value="${echapper(comm)}" placeholder="Ajouter un commentaire…" aria-label="Commentaire du jour pour ${echapper(t.titre)}">
+      ${comm && s.commentaire_par ? `<span class="comm-auteur">Commentaire de ${echapper(s.commentaire_par)}</span>` : ""}</div>`;
+  } else if (comm) {
+    blocComm = `<p class="comm-texte">« ${echapper(comm)} »${s.commentaire_par ? ` <span class="comm-auteur">${echapper(s.commentaire_par)}</span>` : ""}</p>`;
+  }
+  return `<li class="note ${e.fait ? "fait" : ""} ${nouv ? "nouveau" : ""}">
     <div class="note-haut">
-      <label class="coche" title="${t.fait ? "Marquer comme non faite" : "Marquer comme faite"}">
-        <input type="checkbox" data-coche="${t.id}" ${t.fait ? "checked" : ""} aria-label="Tâche faite : ${echapper(t.titre)}">
+      <label class="coche" title="${modifiable ? (e.fait ? "Marquer comme non faite" : "Marquer comme faite") : "Journée passée"}">
+        <input type="checkbox" data-coche="${t.id}" ${e.fait ? "checked" : ""} ${modifiable ? "" : "disabled"} aria-label="Tâche faite : ${echapper(t.titre)}">
         <span class="boite">${ICONE_COCHE}</span>
       </label>
       <div>
-        <p class="intitule" data-titre="${t.id}" title="Modifier">${nouv ? `<span class="marque">${echapper(nouv)}</span>` : ""}${echapper(t.titre)}</p>
+        <p class="intitule" ${modifiable ? `data-titre="${t.id}" title="Modifier"` : ""}>${nouv ? `<span class="marque">${echapper(nouv)}</span>` : ""}<span class="texte-tache">${echapper(t.titre)}</span></p>
         ${t.commentaire ? `<p class="commentaire">${echapper(t.commentaire)}</p>` : ""}
-        ${t.fait && t.fait_par ? `<p class="faitpar">Fait par ${echapper(t.fait_par)} le ${dateHeure(t.fait_le)}</p>` : ""}
+        ${reportee ? `<span class="report">Reportée depuis le ${jourCourt(jourDe(t.cree_le))}</span>` : ""}
+        ${e.fait && e.par ? `<p class="faitpar">Fait par ${echapper(e.par)} à ${heure(e.le)}</p>` : ""}
       </div>
     </div>
+    ${blocComm}
     <div class="note-bas">
       ${avatars(t.responsable)}
-      <div class="actions">
+      ${modifiable ? `<div class="actions">
         <button class="icone" data-modif="${t.id}" aria-label="Modifier ou déplacer" title="Modifier ou déplacer">${ICONE_MODIF}</button>
         <button class="icone" data-suppr="${t.id}" aria-label="Supprimer" title="Supprimer">${ICONE_SUPPR}</button>
-      </div>
+      </div>` : ""}
     </div>
   </li>`;
 }
 
 function afficher(){
+  const auj = aujourdhui();
+  const estAujourdhui = jourVu === auj;
+  document.body.classList.toggle("lecture", !estAujourdhui);
+
+  // Barre de la date
+  $("jour-texte").textContent = jourLong(jourVu);
+  $("jour-sous").textContent = estAujourdhui ? "Aujourd’hui"
+    : (jourVu === decaler(auj, -1) ? "Hier, en consultation" : "Journée passée, en consultation");
+  $("jour-suiv").disabled = estAujourdhui;
+  $("jour-auj").classList.toggle("cache", estAujourdhui);
+
   document.querySelectorAll(".filtre").forEach(b => b.setAttribute("aria-pressed", b.dataset.filtre === filtre));
-  const nbNouv = taches.filter(nouveaute).length;
+  const nbNouv = estAujourdhui ? taches.filter(t => presente(t, jourVu) && nouveaute(t)).length : 0;
   $("bandeau-nouveau").classList.toggle("cache", nbNouv === 0);
   $("texte-nouveau").textContent = (nbNouv === 1 ? "1 changement de " : nbNouv + " changements de ") + autre() + " depuis votre dernière visite";
 
-  // Garde le texte en cours de saisie et le champ actif
-  const actif = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.ajout : null;
+  // Garde le texte en cours de saisie (ajout ou commentaire) pendant les mises à jour en direct
+  const actif = document.activeElement;
+  let garde = null;
+  if (actif && actif.dataset && (actif.dataset.ajout || actif.dataset.comm)) {
+    garde = { cle: actif.dataset.ajout ? "ajout" : "comm", id: actif.dataset.ajout || actif.dataset.comm,
+      valeur: actif.value, debut: actif.selectionStart, fin: actif.selectionEnd };
+  }
   const saisies = {};
   document.querySelectorAll("[data-ajout]").forEach(i => saisies[i.dataset.ajout] = i.value);
 
   $("tableau").innerHTML = COLONNES.map(c => {
-    const liste = taches.filter(t => t.onglet === c.id && correspondFiltre(t)).sort(trier);
-    const enCours = liste.filter(t => !t.fait), faites = liste.filter(t => t.fait);
+    const liste = taches.filter(t => t.onglet === c.id && presente(t, jourVu) && correspondFiltre(t)).sort(trier);
+    const restantes = liste.filter(t => !etat(t, jourVu).fait).length;
     const nouv = liste.some(nouveaute);
     return `<section class="colonne ${c.id === colonneMobile ? "active" : ""}" data-onglet="${c.id}">
       <div class="col-tete">
         <h2>${c.nom}<small>${c.aide}</small></h2>
-        <span class="compte ${nouv ? "a-nouveau" : ""}" title="Tâches en cours">${enCours.length}</span>
+        <span class="compte ${nouv ? "a-nouveau" : ""}" title="Tâches restantes">${restantes}</span>
       </div>
-      <form class="col-ajout" data-form="${c.id}" autocomplete="off">
+      ${estAujourdhui ? `<form class="col-ajout" data-form="${c.id}" autocomplete="off">
         <input type="text" maxlength="300" data-ajout="${c.id}" placeholder="Ajouter une tâche…" aria-label="Ajouter une tâche dans ${c.nom}">
         <button type="submit" aria-label="Ajouter">+</button>
-      </form>
-      <ul class="notes">${enCours.length ? enCours.map(note).join("") : `<li class="vide">Rien en cours</li>`}</ul>
-      ${faites.length ? `<details class="col-faites" data-faites="${c.id}" ${ouvertes.has(c.id) ? "open" : ""}>
-        <summary>Terminées (${faites.length})</summary>
-        <ul class="notes">${faites.map(note).join("")}</ul>
-      </details>` : ""}
+      </form>` : ""}
+      <ul class="notes">${liste.length ? liste.map(t => note(t, estAujourdhui)).join("") : `<li class="vide">${estAujourdhui ? "Rien pour l’instant" : "Aucune tâche ce jour-là"}</li>`}</ul>
     </section>`;
   }).join("");
 
   document.querySelectorAll("[data-ajout]").forEach(i => { if (saisies[i.dataset.ajout]) i.value = saisies[i.dataset.ajout]; });
-  if (actif) { const i = document.querySelector(`[data-ajout="${actif}"]`); if (i) i.focus(); }
+  if (garde) {
+    const i = document.querySelector(`[data-${garde.cle}="${garde.id}"]`);
+    if (i) { i.value = garde.valeur; i.focus(); try { i.setSelectionRange(garde.debut, garde.fin); } catch(e) {} }
+  }
 
   // Onglets téléphone
   document.querySelectorAll(".onglet").forEach(b => {
     const id = b.dataset.voir;
     b.setAttribute("aria-selected", id === colonneMobile);
     const cpt = b.querySelector(".compte");
-    cpt.textContent = taches.filter(t => t.onglet === id && !t.fait && correspondFiltre(t)).length;
-    cpt.classList.toggle("a-nouveau", taches.some(t => t.onglet === id && nouveaute(t)));
+    cpt.textContent = taches.filter(t => t.onglet === id && presente(t, jourVu) && correspondFiltre(t) && !etat(t, jourVu).fait).length;
+    cpt.classList.toggle("a-nouveau", taches.some(t => t.onglet === id && presente(t, jourVu) && nouveaute(t)));
   });
 }
 
@@ -523,6 +657,9 @@ function afficher(){
 document.querySelectorAll(".filtre").forEach(b => b.addEventListener("click", () => { filtre = b.dataset.filtre; afficher(); }));
 document.querySelectorAll(".onglet").forEach(b => b.addEventListener("click", () => { colonneMobile = b.dataset.voir; afficher(); }));
 $("btn-vu").addEventListener("click", () => { dernierPassage = maintenant(); afficher(); });
+$("jour-prec").addEventListener("click", () => allerAuJour(decaler(jourVu, -1)));
+$("jour-suiv").addEventListener("click", () => allerAuJour(decaler(jourVu, 1)));
+$("jour-auj").addEventListener("click", () => allerAuJour(aujourdhui()));
 
 const tableau = $("tableau");
 
@@ -542,21 +679,45 @@ tableau.addEventListener("submit", async (e) => {
   toast("Tâche ajoutée dans « " + NOMS[col] + " »");
 });
 
-// Cocher / décocher
-tableau.addEventListener("change", async (e) => {
-  const id = e.target.dataset.coche; if (!id) return;
-  const fait = e.target.checked;
-  const { data, error } = await db.from(TABLE)
-    .update({ fait, fait_par: fait ? moi : null, fait_le: fait ? maintenant() : null, maj_par: moi })
-    .eq("id", id).select().single();
-  if (error) { e.target.checked = !fait; toast(messageErreur(error)); return; }
-  remplacer(data); afficher();
-});
+// Enregistre une ligne de suivi du jour (routine cochée, commentaire)
+async function enregistrerSuivi(tacheId, valeurs){
+  const { data, error } = await db.from(SUIVI)
+    .upsert({ tache_id: tacheId, jour: aujourdhui(), maj_par: moi, ...valeurs }, { onConflict: "tache_id,jour" })
+    .select().single();
+  if (error) { toast(messageErreur(error)); return false; }
+  rangerSuivi(data);
+  return true;
+}
 
-tableau.addEventListener("toggle", (e) => {
-  const c = e.target.dataset && e.target.dataset.faites; if (!c) return;
-  e.target.open ? ouvertes.add(c) : ouvertes.delete(c);
-}, true);
+// Cocher / décocher, et commentaire du jour
+tableau.addEventListener("change", async (e) => {
+  const idComm = e.target.dataset.comm;
+  if (idComm) {
+    const t = taches.find(x => x.id === idComm); if (!t) return;
+    const texte = e.target.value.trim();
+    const avant = (suiviDe(t, aujourdhui()) || {}).commentaire || "";
+    if (texte === avant) return;
+    if (await enregistrerSuivi(t.id, { commentaire: texte || null, commentaire_par: texte ? moi : null })) {
+      afficher(); toast(texte ? "Commentaire enregistré" : "Commentaire effacé");
+    }
+    return;
+  }
+  const id = e.target.dataset.coche; if (!id) return;
+  const t = taches.find(x => x.id === id); if (!t) return;
+  const fait = e.target.checked;
+  const valeurs = { fait, fait_par: fait ? moi : null, fait_le: fait ? maintenant() : null };
+  if (t.onglet === "routine") {
+    if (!(await enregistrerSuivi(t.id, valeurs))) { e.target.checked = !fait; return; }
+  } else {
+    const { data, error } = await db.from(TABLE).update({ ...valeurs, maj_par: moi }).eq("id", id).select().single();
+    if (error) { e.target.checked = !fait; toast(messageErreur(error)); return; }
+    remplacer(data);
+  }
+  afficher();
+});
+tableau.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.dataset && e.target.dataset.comm) { e.preventDefault(); e.target.blur(); }
+});
 
 // Modifier / supprimer (avec Annuler)
 tableau.addEventListener("click", async (e) => {
@@ -565,14 +726,14 @@ tableau.addEventListener("click", async (e) => {
   const bSuppr = e.target.closest("[data-suppr]");
   if (!bSuppr) return;
   const t = taches.find(x => x.id === bSuppr.dataset.suppr); if (!t) return;
-  const { error } = await db.from(TABLE).delete().eq("id", t.id);
+  // La tâche est retirée à partir d’aujourd’hui mais reste visible dans l’historique des jours passés
+  const { data, error } = await db.from(TABLE).update({ supprime_le: maintenant(), maj_par: moi }).eq("id", t.id).select().single();
   if (error) { toast(messageErreur(error)); return; }
-  taches = taches.filter(x => x.id !== t.id);
-  afficher();
+  remplacer(data); afficher();
   toast("Tâche supprimée", { label: "Annuler", fn: async () => {
-    const { data, error: err } = await db.from(TABLE).insert(t).select().single();
+    const { data: d2, error: err } = await db.from(TABLE).update({ supprime_le: null, maj_par: moi }).eq("id", t.id).select().single();
     if (err) { toast(messageErreur(err)); return; }
-    remplacer(data); afficher(); toast("Tâche remise en place");
+    remplacer(d2); afficher(); toast("Tâche remise en place");
   }});
 });
 
