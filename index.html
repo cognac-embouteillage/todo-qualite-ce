@@ -276,9 +276,9 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
   </div>
 
   <nav class="onglets" aria-label="Colonnes">
+    <button class="onglet" data-onglet="routine" data-voir="routine">Routine <span class="compte"></span></button>
     <button class="onglet" data-onglet="a_faire" data-voir="a_faire">À faire <span class="compte"></span></button>
     <button class="onglet" data-onglet="pas_urgent" data-voir="pas_urgent">Pas urgent <span class="compte"></span></button>
-    <button class="onglet" data-onglet="routine" data-voir="routine">Routine <span class="compte"></span></button>
   </nav>
 
   <div class="tableau" id="tableau"></div>
@@ -290,9 +290,9 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
     <label class="champ"><span>Intitulé *</span><input type="text" id="t-titre" maxlength="300" required></label>
     <fieldset class="groupe"><legend>Colonne</legend>
       <div class="choix">
+        <label><input type="radio" name="t-onglet" value="routine"><span>Routine</span></label>
         <label><input type="radio" name="t-onglet" value="a_faire" checked><span>À faire</span></label>
         <label><input type="radio" name="t-onglet" value="pas_urgent"><span>Pas urgent</span></label>
-        <label><input type="radio" name="t-onglet" value="routine"><span>Routine</span></label>
       </div>
     </fieldset>
     <fieldset class="groupe"><legend>Responsable</legend>
@@ -329,13 +329,13 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSe
 const TABLE = "todo_taches";      // les tâches
 const SUIVI = "todo_suivi";       // le suivi jour par jour (routines cochées, commentaires)
 const COLONNES = [
+  { id: "routine", nom: "Routine", aide: "Repart à zéro chaque jour" },
   { id: "a_faire", nom: "À faire", aide: "Les tâches en cours" },
-  { id: "pas_urgent", nom: "Pas urgent", aide: "Quand on a le temps" },
-  { id: "routine", nom: "Routine", aide: "Repart à zéro chaque jour" }
+  { id: "pas_urgent", nom: "Pas urgent", aide: "Quand on a le temps" }
 ];
 const NOMS = Object.fromEntries(COLONNES.map(c => [c.id, c.nom]));
 
-let taches = [], moi = "", filtre = "toutes", colonneMobile = "a_faire";
+let taches = [], moi = "", filtre = "toutes", colonneMobile = "routine";
 let tacheEnEdition = null, dernierPassage = null, canal = null;
 let jourVu = "";                  // journée affichée (AAAA-MM-JJ)
 const suiviParJour = {};          // { "AAAA-MM-JJ": { tache_id: ligne } }
