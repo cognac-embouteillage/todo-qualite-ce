@@ -277,8 +277,8 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
 
   <nav class="onglets" aria-label="Colonnes">
     <button class="onglet" data-onglet="a_faire" data-voir="a_faire">À faire <span class="compte"></span></button>
-    <button class="onglet" data-onglet="routine" data-voir="routine">Routine <span class="compte"></span></button>
     <button class="onglet" data-onglet="pas_urgent" data-voir="pas_urgent">Pas urgent <span class="compte"></span></button>
+    <button class="onglet" data-onglet="routine" data-voir="routine">Routine <span class="compte"></span></button>
   </nav>
 
   <div class="tableau" id="tableau"></div>
@@ -291,8 +291,8 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
     <fieldset class="groupe"><legend>Colonne</legend>
       <div class="choix">
         <label><input type="radio" name="t-onglet" value="a_faire" checked><span>À faire</span></label>
-        <label><input type="radio" name="t-onglet" value="routine"><span>Routine</span></label>
         <label><input type="radio" name="t-onglet" value="pas_urgent"><span>Pas urgent</span></label>
+        <label><input type="radio" name="t-onglet" value="routine"><span>Routine</span></label>
       </div>
     </fieldset>
     <fieldset class="groupe"><legend>Responsable</legend>
@@ -330,8 +330,8 @@ const TABLE = "todo_taches";      // les tâches
 const SUIVI = "todo_suivi";       // le suivi jour par jour (routines cochées, commentaires)
 const COLONNES = [
   { id: "a_faire", nom: "À faire", aide: "Les tâches en cours" },
-  { id: "routine", nom: "Routine", aide: "Repart à zéro chaque jour" },
-  { id: "pas_urgent", nom: "Pas urgent", aide: "Quand on a le temps" }
+  { id: "pas_urgent", nom: "Pas urgent", aide: "Quand on a le temps" },
+  { id: "routine", nom: "Routine", aide: "Repart à zéro chaque jour" }
 ];
 const NOMS = Object.fromEntries(COLONNES.map(c => [c.id, c.nom]));
 
@@ -544,7 +544,13 @@ function correspondFiltre(t){
   const cible = filtre === "moi" ? moi : autre();
   return t.responsable === cible || t.responsable === "Les deux";
 }
-const trier = (a, b) => ms(a.cree_le) - ms(b.cree_le);
+// Tâches à faire en haut (ordre de création), tâches faites en bas (ordre où elles ont été cochées)
+function trier(a, b){
+  const ea = etat(a, jourVu), eb = etat(b, jourVu);
+  if (ea.fait !== eb.fait) return ea.fait ? 1 : -1;
+  if (ea.fait) return ms(ea.le) - ms(eb.le);
+  return ms(a.cree_le) - ms(b.cree_le);
+}
 
 const ICONE_COCHE = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 const ICONE_MODIF = '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>';
