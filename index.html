@@ -178,6 +178,22 @@ header.entete{display:flex;align-items:center;justify-content:space-between;gap:
 .comm-texte{margin:.55rem 0 0;font-size:.92rem;font-style:italic;white-space:pre-wrap;overflow-wrap:anywhere}
 .note.fait .texte-tache{text-decoration:line-through}
 
+/* Vue en grand */
+.note[data-id]{cursor:pointer}
+.futur .coche input{cursor:default}
+#detail{width:min(640px,calc(100% - 1.5rem))}
+.fenetre.detail{border-top:6px solid var(--c);border-radius:14px}
+.detail-col{display:inline-block;font-size:.8rem;font-weight:700;color:#fff;background:var(--c);border-radius:999px;padding:.15rem .65rem;margin-bottom:.6rem}
+.detail h2{font-size:1.45rem;margin:0 0 .3rem;overflow-wrap:anywhere}
+.detail .commentaire{font-size:1rem}
+.detail-infos{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;margin:.8rem 0 1.2rem}
+.detail-infos .faitpar,.detail-infos .report{margin:0}
+.detail-label{display:block;font-weight:700;margin-bottom:.4rem}
+#d-comm{width:100%;min-height:11rem;padding:.85rem .95rem;border:2px solid var(--trait);border-radius:10px;background:var(--papier);color:var(--encre);font-size:1.15rem;line-height:1.55;resize:vertical}
+#d-comm:focus{outline:none;border-color:var(--c)}
+#d-comm[readonly]{cursor:default}
+.detail .pied{margin-top:1.1rem}
+
 /* Terminées */
 .col-faites{margin-top:1.3rem}
 .col-faites summary{cursor:pointer;font-weight:700;color:var(--doux);list-style:none;display:flex;align-items:center;gap:.55rem;min-height:40px;margin-bottom:.6rem}
@@ -302,6 +318,7 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
         <label><input type="radio" name="t-resp" value="Les deux" checked><span>Les deux</span></label>
       </div>
     </fieldset>
+    <label class="champ"><span>Prévue pour le (facultatif)</span><input type="date" id="t-jour"></label>
     <label class="champ"><span>Description (facultatif)</span><textarea id="t-comm" maxlength="2000"></textarea></label>
     <p class="erreur" id="erreur-tache" role="alert"></p>
     <div class="pied">
@@ -309,6 +326,22 @@ dialog::backdrop{background:rgba(30,18,12,.55)}
       <button class="btn btn-principal" type="submit">Enregistrer</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="detail" aria-labelledby="d-titre">
+  <div class="fenetre detail">
+    <span class="detail-col" id="d-col"></span>
+    <h2 id="d-titre"></h2>
+    <p class="commentaire" id="d-desc"></p>
+    <div class="detail-infos" id="d-infos"></div>
+    <label class="detail-label" id="d-comm-titre" for="d-comm"></label>
+    <textarea id="d-comm" maxlength="1000"></textarea>
+    <span class="comm-auteur" id="d-comm-auteur"></span>
+    <div class="pied">
+      <button class="btn btn-leger" type="button" id="d-modifier">Modifier la tâche</button>
+      <button class="btn btn-principal" type="button" id="d-fermer">Fermer</button>
+    </div>
+  </div>
 </dialog>
 
 <div id="toast" class="cache" role="status"></div>
@@ -390,7 +423,7 @@ function messageErreur(err){
   if (/invalid api key|no api key/i.test(m)) return "Clé Supabase incorrecte dans le fichier.";
   if (/fetch|network/i.test(m)) return "Le serveur ne répond pas. Vérifiez la connexion internet.";
   if (/row-level security|permission/i.test(m)) return "Ce compte n’a pas accès aux tâches.";
-  if (/todo_suivi|supprime_le/i.test(m)) return "La base n’est pas à jour : lancez le nouveau script SQL dans Supabase.";
+  if (/todo_suivi|supprime_le|jour_prevu/i.test(m)) return "La base n’est pas à jour : lancez le nouveau script SQL dans Supabase.";
   if (/relation .* does not exist|todo_taches/i.test(m)) return "La table des tâches n’existe pas encore : lancez le script SQL dans Supabase.";
   return "Erreur : " + (m || "action impossible.");
 }
@@ -404,8 +437,13 @@ function rangerSuivi(ligne){
 
 /* ---------- Ce qui s’affiche pour une journée ---------- */
 const suiviDe = (t, jour) => (suiviParJour[jour] || {})[t.id] || null;
+// Premier jour où la tâche apparaît : le jour prévu s’il y en a un, sinon le jour de création
+function debut(t){
+  const cree = jourDe(t.cree_le);
+  return t.jour_prevu && t.jour_prevu > cree ? t.jour_prevu : cree;
+}
 function presente(t, jour){
-  if (jourDe(t.cree_le) > jour) return false;                         // pas encore créée
+  if (debut(t) > jour) return false;                                  // pas encore commencée
   if (t.supprime_le && jourDe(t.supprime_le) <= jour) return false;    // supprimée
   if (t.onglet === "routine") return true;                             // une routine revient chaque jour
   return !t.fait || jourDe(t.fait_le) >= jour;                         // reportée jusqu’au jour où elle est faite
@@ -503,8 +541,6 @@ async function toutCharger(){
   afficher();
 }
 async function allerAuJour(jour){
-  const auj = aujourdhui();
-  if (jour > auj) jour = auj;
   jourVu = jour;
   if (!suiviParJour[jour]) { chargement(true); await chargerSuivi(jour); chargement(false); }
   afficher();
@@ -562,36 +598,38 @@ function avatars(resp){
   return `<span class="resp"><span class="avatars">${ronds}</span>${qui.join(" et ")}</span>`;
 }
 
-function note(t, modifiable){
+function note(t, mode){
+  const modifiable = mode === "aujourdhui";   // cocher et commenter
+  const editable = mode !== "passe";          // modifier, déplacer, supprimer
   const e = etat(t, jourVu);
   const s = suiviDe(t, jourVu);
   const nouv = nouveaute(t);
-  const reportee = !e.fait && t.onglet !== "routine" && jourDe(t.cree_le) < jourVu;
+  const reportee = !e.fait && t.onglet !== "routine" && debut(t) < jourVu;
   const comm = s && s.commentaire ? s.commentaire : "";
   let blocComm = "";
   if (modifiable) {
-    blocComm = `<div class="comm"><input type="text" maxlength="500" data-comm="${t.id}" value="${echapper(comm)}" placeholder="Ajouter un commentaire…" aria-label="Commentaire du jour pour ${echapper(t.titre)}">
+    blocComm = `<div class="comm"><input type="text" maxlength="1000" data-comm="${t.id}" value="${echapper(comm)}" placeholder="Ajouter un commentaire…" aria-label="Commentaire du jour pour ${echapper(t.titre)}">
       ${comm && s.commentaire_par ? `<span class="comm-auteur">Commentaire de ${echapper(s.commentaire_par)}</span>` : ""}</div>`;
   } else if (comm) {
     blocComm = `<p class="comm-texte">« ${echapper(comm)} »${s.commentaire_par ? ` <span class="comm-auteur">${echapper(s.commentaire_par)}</span>` : ""}</p>`;
   }
-  return `<li class="note ${e.fait ? "fait" : ""} ${nouv ? "nouveau" : ""}">
+  return `<li class="note ${e.fait ? "fait" : ""} ${nouv ? "nouveau" : ""}" data-id="${t.id}" title="Cliquer pour voir en grand">
     <div class="note-haut">
-      <label class="coche" title="${modifiable ? (e.fait ? "Marquer comme non faite" : "Marquer comme faite") : "Journée passée"}">
+      <label class="coche" title="${modifiable ? (e.fait ? "Marquer comme non faite" : "Marquer comme faite") : (mode === "futur" ? "Pas encore ce jour-là" : "Journée passée")}">
         <input type="checkbox" data-coche="${t.id}" ${e.fait ? "checked" : ""} ${modifiable ? "" : "disabled"} aria-label="Tâche faite : ${echapper(t.titre)}">
         <span class="boite">${ICONE_COCHE}</span>
       </label>
       <div>
-        <p class="intitule" ${modifiable ? `data-titre="${t.id}" title="Modifier"` : ""}>${nouv ? `<span class="marque">${echapper(nouv)}</span>` : ""}<span class="texte-tache">${echapper(t.titre)}</span></p>
+        <p class="intitule">${nouv ? `<span class="marque">${echapper(nouv)}</span>` : ""}<span class="texte-tache">${echapper(t.titre)}</span></p>
         ${t.commentaire ? `<p class="commentaire">${echapper(t.commentaire)}</p>` : ""}
-        ${reportee ? `<span class="report">Reportée depuis le ${jourCourt(jourDe(t.cree_le))}</span>` : ""}
+        ${reportee ? `<span class="report">Reportée depuis le ${jourCourt(debut(t))}</span>` : ""}
         ${e.fait && e.par ? `<p class="faitpar">Fait par ${echapper(e.par)} à ${heure(e.le)}</p>` : ""}
       </div>
     </div>
     ${blocComm}
     <div class="note-bas">
       ${avatars(t.responsable)}
-      ${modifiable ? `<div class="actions">
+      ${editable ? `<div class="actions">
         <button class="icone" data-modif="${t.id}" aria-label="Modifier ou déplacer" title="Modifier ou déplacer">${ICONE_MODIF}</button>
         <button class="icone" data-suppr="${t.id}" aria-label="Supprimer" title="Supprimer">${ICONE_SUPPR}</button>
       </div>` : ""}
@@ -601,14 +639,17 @@ function note(t, modifiable){
 
 function afficher(){
   const auj = aujourdhui();
-  const estAujourdhui = jourVu === auj;
-  document.body.classList.toggle("lecture", !estAujourdhui);
+  const estAujourdhui = jourVu === auj, estFutur = jourVu > auj;
+  const mode = estAujourdhui ? "aujourdhui" : (estFutur ? "futur" : "passe");
+  document.body.classList.toggle("lecture", mode === "passe");
+  document.body.classList.toggle("futur", estFutur);
 
   // Barre de la date
   $("jour-texte").textContent = jourLong(jourVu);
+  const ecart = Math.round((enDate(jourVu) - enDate(auj)) / 86400000);
   $("jour-sous").textContent = estAujourdhui ? "Aujourd’hui"
-    : (jourVu === decaler(auj, -1) ? "Hier, en consultation" : "Journée passée, en consultation");
-  $("jour-suiv").disabled = estAujourdhui;
+    : estFutur ? (ecart === 1 ? "Demain : tâches prévues" : "Dans " + ecart + " jours : tâches prévues")
+    : (ecart === -1 ? "Hier, en consultation" : "Journée passée, en consultation");
   $("jour-auj").classList.toggle("cache", estAujourdhui);
 
   document.querySelectorAll(".filtre").forEach(b => b.setAttribute("aria-pressed", b.dataset.filtre === filtre));
@@ -635,11 +676,11 @@ function afficher(){
         <h2>${c.nom}<small>${c.aide}</small></h2>
         <span class="compte ${nouv ? "a-nouveau" : ""}" title="Tâches restantes">${restantes}</span>
       </div>
-      ${estAujourdhui ? `<form class="col-ajout" data-form="${c.id}" autocomplete="off">
-        <input type="text" maxlength="300" data-ajout="${c.id}" placeholder="Ajouter une tâche…" aria-label="Ajouter une tâche dans ${c.nom}">
+      ${mode !== "passe" ? `<form class="col-ajout" data-form="${c.id}" autocomplete="off">
+        <input type="text" maxlength="300" data-ajout="${c.id}" placeholder="${estFutur ? "Prévoir une tâche ce jour-là…" : "Ajouter une tâche…"}" aria-label="Ajouter une tâche dans ${c.nom}">
         <button type="submit" aria-label="Ajouter">+</button>
       </form>` : ""}
-      <ul class="notes">${liste.length ? liste.map(t => note(t, estAujourdhui)).join("") : `<li class="vide">${estAujourdhui ? "Rien pour l’instant" : "Aucune tâche ce jour-là"}</li>`}</ul>
+      <ul class="notes">${liste.length ? liste.map(t => note(t, mode)).join("") : `<li class="vide">${mode === "passe" ? "Aucune tâche ce jour-là" : (estFutur ? "Rien de prévu" : "Rien pour l’instant")}</li>`}</ul>
     </section>`;
   }).join("");
 
@@ -677,12 +718,12 @@ tableau.addEventListener("submit", async (e) => {
   const titre = champ.value.trim();
   if (!titre) { champ.focus(); return; }
   champ.value = "";
-  const { data, error } = await db.from(TABLE)
-    .insert({ titre, onglet: col, responsable: "Les deux", cree_par: moi, maj_par: moi })
-    .select().single();
+  const ligne = { titre, onglet: col, responsable: "Les deux", cree_par: moi, maj_par: moi };
+  if (jourVu > aujourdhui()) ligne.jour_prevu = jourVu;   // tâche prévue pour un prochain jour
+  const { data, error } = await db.from(TABLE).insert(ligne).select().single();
   if (error) { champ.value = titre; toast(messageErreur(error)); return; }
   remplacer(data); afficher();
-  toast("Tâche ajoutée dans « " + NOMS[col] + " »");
+  toast(ligne.jour_prevu ? "Tâche prévue pour le " + jourLong(jourVu).toLowerCase() : "Tâche ajoutée dans « " + NOMS[col] + " »");
 });
 
 // Enregistre une ligne de suivi du jour (routine cochée, commentaire)
@@ -727,10 +768,16 @@ tableau.addEventListener("keydown", (e) => {
 
 // Modifier / supprimer (avec Annuler)
 tableau.addEventListener("click", async (e) => {
-  const cible = e.target.closest("[data-titre],[data-modif]");
-  if (cible) { ouvrirFenetre(taches.find(t => t.id === (cible.dataset.titre || cible.dataset.modif))); return; }
+  const bModif = e.target.closest("[data-modif]");
+  if (bModif) { ouvrirFenetre(taches.find(t => t.id === bModif.dataset.modif)); return; }
   const bSuppr = e.target.closest("[data-suppr]");
-  if (!bSuppr) return;
+  if (!bSuppr) {
+    // Clic sur le post-it (hors case à cocher, commentaire et boutons) : vue en grand
+    if (e.target.closest("input, textarea, label, button, a")) return;
+    const li = e.target.closest(".note[data-id]");
+    if (li) ouvrirDetail(taches.find(t => t.id === li.dataset.id));
+    return;
+  }
   const t = taches.find(x => x.id === bSuppr.dataset.suppr); if (!t) return;
   // La tâche est retirée à partir d’aujourd’hui mais reste visible dans l’historique des jours passés
   const { data, error } = await db.from(TABLE).update({ supprime_le: maintenant(), maj_par: moi }).eq("id", t.id).select().single();
@@ -743,6 +790,50 @@ tableau.addEventListener("click", async (e) => {
   }});
 });
 
+/* ---------- Vue en grand d’un post-it ---------- */
+let tacheEnDetail = null, commAvant = "";
+function ouvrirDetail(t){
+  if (!t) return;
+  tacheEnDetail = t;
+  const auj = aujourdhui();
+  const mode = jourVu === auj ? "aujourdhui" : (jourVu > auj ? "futur" : "passe");
+  const e = etat(t, jourVu), s = suiviDe(t, jourVu);
+  $("detail").dataset.onglet = t.onglet;
+  $("d-col").textContent = NOMS[t.onglet] || "";
+  $("d-titre").textContent = t.titre;
+  $("d-desc").textContent = t.commentaire || "";
+  $("d-desc").classList.toggle("cache", !t.commentaire);
+  const infos = [avatars(t.responsable)];
+  if (e.fait && e.par) infos.push(`<span class="faitpar">Fait par ${echapper(e.par)} à ${heure(e.le)}</span>`);
+  if (!e.fait && t.onglet !== "routine" && debut(t) < jourVu) infos.push(`<span class="report">Reportée depuis le ${jourCourt(debut(t))}</span>`);
+  $("d-infos").innerHTML = infos.join("");
+  commAvant = s && s.commentaire ? s.commentaire : "";
+  $("d-comm-titre").textContent = "Commentaire du " + jourLong(jourVu).toLowerCase();
+  const zone = $("d-comm");
+  zone.value = commAvant;
+  zone.readOnly = mode !== "aujourdhui";
+  zone.placeholder = mode === "aujourdhui" ? "Écrire un commentaire pour aujourd’hui…"
+    : (mode === "futur" ? "Le commentaire se remplit le jour même." : "Aucun commentaire ce jour-là.");
+  $("d-comm-auteur").textContent = commAvant && s.commentaire_par ? "Écrit par " + s.commentaire_par : "";
+  $("d-modifier").classList.toggle("cache", mode === "passe");
+  $("detail").showModal();
+  $("d-fermer").focus();
+}
+// À la fermeture, le commentaire modifié est enregistré
+async function fermerDetail(){
+  const t = tacheEnDetail; if (!t) return;
+  tacheEnDetail = null;
+  const texte = $("d-comm").value.trim();
+  if ($("d-comm").readOnly || texte === commAvant) return;
+  if (await enregistrerSuivi(t.id, { commentaire: texte || null, commentaire_par: texte ? moi : null })) {
+    afficher(); toast(texte ? "Commentaire enregistré" : "Commentaire effacé");
+  }
+}
+$("detail").addEventListener("close", fermerDetail);
+$("detail").addEventListener("click", (e) => { if (e.target === $("detail")) $("detail").close(); });
+$("d-fermer").addEventListener("click", () => $("detail").close());
+$("d-modifier").addEventListener("click", () => { const t = tacheEnDetail; $("detail").close(); ouvrirFenetre(t); });
+
 /* ---------- Fenêtre de modification ---------- */
 function ouvrirFenetre(t){
   if (!t) return;
@@ -750,6 +841,8 @@ function ouvrirFenetre(t){
   $("erreur-tache").textContent = "";
   $("t-titre").value = t.titre;
   $("t-comm").value = t.commentaire || "";
+  $("t-jour").min = aujourdhui();
+  $("t-jour").value = t.jour_prevu && t.jour_prevu > aujourdhui() ? t.jour_prevu : "";
   document.querySelector(`input[name="t-onglet"][value="${t.onglet}"]`).checked = true;
   document.querySelector(`input[name="t-resp"][value="${t.responsable}"]`).checked = true;
   $("fenetre").showModal();
@@ -762,11 +855,17 @@ $("form-tache").addEventListener("submit", async (e) => {
   if (!titre) { $("erreur-tache").textContent = "Écrivez l’intitulé de la tâche."; $("t-titre").focus(); return; }
   const onglet = document.querySelector('input[name="t-onglet"]:checked').value;
   const deplacee = tacheEnEdition.onglet !== onglet;
+  // Jour prévu : la date choisie, sinon on garde l’historique (une date future effacée devient « aujourd’hui »)
+  const choisi = $("t-jour").value;
+  let jourPrevu = tacheEnEdition.jour_prevu || null;
+  if (choisi) jourPrevu = choisi;
+  else if (jourPrevu && jourPrevu > aujourdhui()) jourPrevu = aujourdhui();
   chargement(true);
   const { data, error } = await db.from(TABLE).update({
     titre, onglet,
     responsable: document.querySelector('input[name="t-resp"]:checked').value,
     commentaire: $("t-comm").value.trim() || null,
+    jour_prevu: jourPrevu,
     maj_par: moi
   }).eq("id", tacheEnEdition.id).select().single();
   chargement(false);
@@ -775,7 +874,8 @@ $("form-tache").addEventListener("submit", async (e) => {
   $("fenetre").close();
   if (deplacee) colonneMobile = onglet;
   afficher();
-  toast(deplacee ? "Tâche déplacée vers « " + NOMS[onglet] + " »" : "Tâche enregistrée");
+  toast(jourPrevu && jourPrevu > aujourdhui() ? "Tâche prévue pour le " + jourLong(jourPrevu).toLowerCase()
+    : (deplacee ? "Tâche déplacée vers « " + NOMS[onglet] + " »" : "Tâche enregistrée"));
 });
 
 /* ---------- Démarrage ---------- */
